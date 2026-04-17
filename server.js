@@ -32,6 +32,21 @@ function parseJsonResponse(content, fallback) {
   }
 }
 
+function normalizeOverallScoreOutOf10(value) {
+  const raw = Number(value);
+
+  if (!Number.isFinite(raw)) {
+    return 5;
+  }
+
+  // If model returns percentage style score (e.g., 40), convert to /10.
+  const scaled = raw > 10 ? raw / 10 : raw;
+  const clamped = Math.max(0, Math.min(10, scaled));
+
+  // Keep one decimal for stable display like 7.5/10.
+  return Math.round(clamped * 10) / 10;
+}
+
 function normalizeBehavior(behavior) {
   return String(behavior || "").trim().toLowerCase();
 }
@@ -130,13 +145,14 @@ async function createJsonChatCompletion(messages, fallback) {
   return parseJsonResponse(content, fallback);
 }
 
-function buildVoiceInstructions(language, behavior) {
+function buildVoiceInstructions(language, behavior, scenario = "") {
   const lang = (language || "English").trim();
   const persona = (behavior || "professional and balanced").trim();
+  const scenarioContext = (scenario || "").trim();
   const profile = resolveVoiceProfile(persona);
   const languageStyle = getLanguageStyleRules(lang, persona);
 
-  return `Speak only in ${lang}. Keep pronunciation natural for ${lang}. Deliver this as an HR interviewer with this behavior: ${persona}. ${languageStyle} ${profile.styleInstructions} Keep emotional delivery consistent for the full sentence. Do not describe your tone; only speak the content.`;
+  return `Speak only in ${lang}. Keep pronunciation natural for ${lang}. Stay in this scenario persona and talk exactly like that person: ${scenarioContext || "Interviewer"}. Do not break character. Deliver this with this behavior: ${persona}. ${languageStyle} ${profile.styleInstructions} Keep emotional delivery consistent for the full sentence. Do not describe your tone; only speak the content.`;
 }
 
 async function speakText(text, options = {}) {
@@ -146,7 +162,7 @@ async function speakText(text, options = {}) {
     model: "gpt-4o-mini-tts",
     voice: profile.voice,
     input: text,
-    instructions: buildVoiceInstructions(options.language, options.behavior)
+    instructions: buildVoiceInstructions(options.language, options.behavior, options.scenario)
   });
 
   return Buffer.from(await speech.arrayBuffer()).toString("base64");
@@ -247,7 +263,7 @@ async function generateQuestion(topic, history, questionNumber, context = {}) {
     [
       {
         role: "system",
-        content: `You are a strict but helpful VOICE interviewer for the field/domain: ${topic}. Ask exactly one question at a time. The question must be easy to answer verbally. Do not ask for typed code, punctuation-heavy syntax, or long written snippets. Prefer conceptual, scenario-based, and step-by-step explanation questions. Keep wording short, clear, and conversational. The interview language is ${language}. Always ask the question only in ${language}. Use this HR behavior style while framing the question: ${behavior}. ${languageStyle} Use this interview context/prompt to guide questions: ${scenario || "No extra context provided."}. Return JSON with keys: question, topic, difficulty.`
+        content: `You are doing strict role-play Q&A in the field/domain: ${topic}. The scenario defines WHO you are (for example HR, doctor, CEO, manager). You MUST become that person and stay in character for every question. Do not act like a generic practice bot and do not break persona. Ask exactly one question at a time. The question must be easy to answer verbally. Do not ask for typed code, punctuation-heavy syntax, or long written snippets. Prefer conceptual, scenario-based, and step-by-step explanation questions. Keep wording short, clear, and conversational. The interview language is ${language}. Always ask only in ${language}. Behavior style to apply: ${behavior}. ${languageStyle} Scenario/persona to mimic: ${scenario || "No extra context provided."}. Return JSON with keys: question, topic, difficulty.`
       },
       {
         role: "user",
@@ -269,14 +285,14 @@ async function generateQuestion(topic, history, questionNumber, context = {}) {
   );
 }
 
-async function makeVoiceFriendlyQuestion(topic, question, language, behavior) {
+async function makeVoiceFriendlyQuestion(topic, question, language, behavior, scenario = "") {
   const languageStyle = getLanguageStyleRules(language, behavior);
 
   const rewritten = await createJsonChatCompletion(
     [
       {
         role: "system",
-        content: `Rewrite interview questions for voice conversation in the field/domain ${topic}. Keep the same intent but make it naturally speakable. Rules: short sentence, no code blocks, no request for exact syntax, no special symbols-heavy prompt. If the original asks to write code, convert it to explain approach verbally. Output must be only in ${language || "English"}. ${languageStyle} Return JSON with key: question.`
+        content: `Rewrite interview questions for voice conversation in the field/domain ${topic}. Keep the same intent but make it naturally speakable. Stay in this exact scenario persona while phrasing: ${scenario || "Interviewer"}. The rewritten question must sound like it is asked by that person only. Rules: short sentence, no code blocks, no request for exact syntax, no special symbols-heavy prompt. If the original asks to write code, convert it to explain approach verbally. Output must be only in ${language || "English"}. ${languageStyle} Return JSON with key: question.`
       },
       {
         role: "user",
@@ -309,7 +325,7 @@ async function finalAssessment(topic, history, context = {}) {
     [
       {
         role: "system",
-        content: `You are giving a final hiring-style assessment for an interview in the field/domain ${topic}. Decide whether the candidate is ready to work in this field/domain based on the conversation so far. The interview language is ${language}, so all output must be in ${language}. Use this scenario context: ${scenario || "No extra context provided."}. The interviewer behavior used was: ${behavior}. Return JSON with keys: canProceed, verdict, overallScore, summary, strengths, gaps, recommendation.`
+        content: `You are giving a final hiring-style assessment for an interview in the field/domain ${topic}. Decide whether the candidate is ready to work in this field/domain based on the conversation so far. The interview language is ${language}, so all output must be in ${language}. Use this scenario context: ${scenario || "No extra context provided."}. The interviewer behavior used was: ${behavior}. Return JSON with keys: canProceed, verdict, overallScore, summary, strengths, gaps, recommendation. IMPORTANT: overallScore must be a number strictly between 0 and 10 (not percentage, not out of 100).`
       },
       {
         role: "user",
@@ -394,11 +410,13 @@ app.post("/api/interview/start", async (req, res) => {
       topic,
       firstQuestion.question || fallbackQuestionText(topic),
       language,
-      behavior
+      behavior,
+      scenario
     );
     const questionAudio = await safeSpeakText(voiceQuestion, {
       language,
-      behavior
+      behavior,
+      scenario
     });
     const interviewId = crypto.randomUUID();
 
@@ -418,7 +436,6 @@ app.post("/api/interview/start", async (req, res) => {
       questionAudio,
       topic: firstQuestion.topic,
       difficulty: firstQuestion.difficulty,
-      topic,
       language,
       scenario,
       behavior
@@ -483,7 +500,8 @@ app.post("/api/interview/next", upload.single("audio"), async (req, res) => {
         session.topic,
         generated.question || fallbackQuestionText(session.topic),
         session.language,
-        session.behavior
+        session.behavior,
+        session.scenario
       );
       nextQuestion = {
         text: voiceNextQuestion,
@@ -501,7 +519,8 @@ app.post("/api/interview/next", upload.single("audio"), async (req, res) => {
 
     const nextQuestionAudio = await safeSpeakText(nextQuestion.text, {
       language: session.language,
-      behavior: session.behavior
+      behavior: session.behavior,
+      scenario: session.scenario
     });
 
     res.json({
@@ -546,11 +565,13 @@ app.post("/api/interview/finish", async (req, res) => {
       scenario: session.scenario,
       behavior: session.behavior
     });
+    assessment.overallScore = normalizeOverallScoreOutOf10(assessment.overallScore);
     const assessmentAudio = await safeSpeakText(
       `${assessment.verdict}. ${assessment.summary} Recommendation: ${assessment.recommendation}.`
       , {
         language: session.language,
-        behavior: session.behavior
+        behavior: session.behavior,
+        scenario: session.scenario
       }
     );
 
