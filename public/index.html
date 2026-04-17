@@ -439,6 +439,10 @@
 </div>
 
 <script>
+const API_BASE = window.location.hostname.includes("localhost")
+  ? ""
+  : "https://voiceai-3vgo.onrender.com";
+
 const state = {
   interviewId: "",
   technology: "",
@@ -747,7 +751,7 @@ async function startInterview() {
   try {
     await ensureMicrophone();
 
-    const response = await fetch(`${process.env.API_BASE}/api/interview/start`, {
+    const response = await fetch(`${API_BASE}/api/interview/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -807,7 +811,7 @@ async function submitNextAnswer() {
     formData.append("questionNumber", String(state.questionNumber));
     formData.append("audio", answerBlob, "answer.webm");
 
-    const response = await fetch(`${process.env.API_BASE}/api/interview/next`, {
+    const response = await fetch(`${API_BASE}/api/interview/next`, {
       method: "POST",
       body: formData
     });
@@ -851,7 +855,7 @@ async function finishInterview() {
   stepNotice.textContent = "Generating final assessment...";
 
   try {
-    const response = await fetch(`${process.env.API_BASE}/api/interview/finish`, {
+    const response = await fetch(`${API_BASE}/api/interview/finish`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
