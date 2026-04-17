@@ -337,6 +337,11 @@
       .summary-grid {
         grid-template-columns: 1fr;
       }
+
+      #startButton {
+        order: 99;
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -362,11 +367,15 @@
         <select id="languageInput">
           <option value="English">English</option>
           <option value="Hindi">Hindi</option>
-          <option value="Spanish">Spanish</option>
-          <option value="French">French</option>
-          <option value="German">German</option>
-          <option value="Arabic">Arabic</option>
-          <option value="Japanese">Japanese</option>
+          <option value="Tamil">Tamil</option>
+          <option value="Telugu">Telugu</option>
+          <option value="Bengali">Bengali</option>
+          <option value="Marathi">Marathi</option>
+          <option value="Gujarati">Gujarati</option>
+          <option value="Kannada">Kannada</option>
+          <option value="Malayalam">Malayalam</option>
+          <option value="Punjabi">Punjabi</option>
+          <option value="Urdu">Urdu</option>
         </select>
       </div>
       <button class="btn btn-primary" id="startButton" onclick="startInterview()">Start Interview</button>
@@ -375,7 +384,7 @@
         <input id="topicInput" type="text" placeholder="Example: Salary negotiation" />
       </div>
       <div>
-        <label for="behaviorInput">HR Behavior</label>
+        <label for="behaviorInput">Behaviour</label>
         <input id="behaviorInput" type="text" placeholder="Example: angry, strict, soft-hearted, supportive" />
       </div>
       <div style="grid-column: 1 / -1;">
@@ -445,7 +454,7 @@ const API_BASE = window.location.hostname.includes("localhost")
 
 const state = {
   interviewId: "",
-  technology: "",
+  topic: "",
   language: "English",
   scenario: "",
   behavior: "",
@@ -497,10 +506,13 @@ function setRecordingState(isRecording) {
 
   micPill.innerHTML = `Mic: <strong>${recordingLabel}</strong>`;
 
-  const canSubmitAnswer = isRecording && state.captureMode === "answer";
-  nextButton.classList.toggle("hidden", !canSubmitAnswer);
-  nextButton.disabled = !canSubmitAnswer || state.busy;
-  finishButton.classList.toggle("hidden", state.history.length === 0);
+  // Keep controls visible once the interview has a question/session.
+  const hasActiveQuestion = Boolean(state.currentQuestion);
+  const hasActiveSession = Boolean(state.interviewId);
+
+  nextButton.classList.toggle("hidden", !hasActiveQuestion);
+  nextButton.disabled = state.busy;
+  finishButton.classList.toggle("hidden", !hasActiveSession);
   finishButton.disabled = state.busy;
 }
 
@@ -547,9 +559,10 @@ function updateQuestionView(question, questionNumber) {
   questionText.textContent = question;
   questionMeta.textContent = `Question ${questionNumber}. Listen first, then answer out loud when the microphone opens.`;
   progressPill.innerHTML = `Questions answered: <strong>${state.history.length}</strong>`;
-  techPill.innerHTML = `Topic: <strong>${state.technology}</strong>`;
+  techPill.innerHTML = `Topic: <strong>${state.topic}</strong>`;
   languagePill.innerHTML = `Language: <strong>${state.language}</strong>`;
   behaviorPill.innerHTML = `Behavior: <strong>${state.behavior}</strong>`;
+  setRecordingState(state.recording);
   setStatus("In progress");
 }
 
@@ -730,7 +743,7 @@ async function startInterview() {
   setBusy(true);
   finalPanel.classList.add("hidden");
   workspacePanel.classList.remove("hidden");
-  state.technology = topic;
+  state.topic = topic;
   state.language = language;
   state.scenario = scenario;
   state.behavior = behavior;
@@ -745,7 +758,7 @@ async function startInterview() {
   renderHistory();
   languagePill.innerHTML = `Language: <strong>${state.language}</strong>`;
   behaviorPill.innerHTML = `Behavior: <strong>${state.behavior}</strong>`;
-  techPill.innerHTML = `Topic: <strong>${state.technology}</strong>`;
+  techPill.innerHTML = `Topic: <strong>${state.topic}</strong>`;
   progressPill.innerHTML = "Questions answered: <strong>0</strong>";
 
   try {
@@ -755,7 +768,7 @@ async function startInterview() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        technology: state.technology,
+        topic: state.topic,
         language: state.language,
         scenario: state.scenario,
         behavior: state.behavior
@@ -912,6 +925,11 @@ async function finishInterview() {
     setStatus(assessment.canProceed ? "Ready" : "Needs practice", assessment.canProceed ? "var(--good)" : "var(--bad)");
     stepNotice.textContent = "Final assessment complete.";
     await playAudio(data.assessmentAudio, `${assessment.verdict}. ${assessment.summary} Recommendation: ${assessment.recommendation}.`);
+
+    state.interviewId = "";
+    state.currentQuestion = "";
+    state.questionNumber = 0;
+    setRecordingState(false);
   } catch (error) {
     alert(error.message);
     setStatus("Error", "var(--bad)");
