@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const OpenAI = require("openai");
+const nspell = require("nspell");
 
 dotenv.config();
 
@@ -21,8 +22,59 @@ const openai = new OpenAI({
 });
 
 const interviewSessions = new Map();
+let englishSpell = null;
 
 app.use(express.json({ limit: "1mb" }));
+
+function loadEnglishSpellChecker() {
+  if (englishSpell) {
+    return Promise.resolve(englishSpell);
+  }
+
+  return import("dictionary-en").then((module) => {
+    const dictionary = module.default || module;
+    englishSpell = nspell(dictionary);
+    return englishSpell;
+  });
+}
+
+function matchTokenCase(source, target) {
+  if (!source || !target) {
+    return target;
+  }
+
+  const isUpper = source === source.toUpperCase();
+  const firstUpper = source[0] === source[0].toUpperCase();
+
+  if (isUpper) {
+    return target.toUpperCase();
+  }
+
+  if (firstUpper) {
+    return target[0].toUpperCase() + target.slice(1);
+  }
+
+  return target;
+}
+
+function getCorrectionForToken(spell, token) {
+  const cleanToken = String(token || "").trim();
+
+  if (!cleanToken || cleanToken.length < 2 || /\d/.test(cleanToken)) {
+    return cleanToken;
+  }
+
+  if (spell.correct(cleanToken)) {
+    return cleanToken;
+  }
+
+  const suggestions = spell.suggest(cleanToken);
+  if (!suggestions.length) {
+    return cleanToken;
+  }
+
+  return matchTokenCase(cleanToken, suggestions[0]);
+}
 
 function parseJsonResponse(content, fallback) {
   try {
@@ -641,6 +693,29 @@ app.post("/api/interview/finish", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Unable to finish interview" });
+  }
+});
+
+app.post("/api/spellcheck", async (req, res) => {
+  try {
+    const text = String(req.body?.text || "");
+
+    if (!text.trim()) {
+      return res.json({ correctedText: text, changed: false });
+    }
+
+    const spell = await loadEnglishSpellChecker();
+    const correctedText = text.replace(/[A-Za-z']+/g, (token) => {
+      return getCorrectionForToken(spell, token);
+    });
+
+    return res.json({
+      correctedText,
+      changed: correctedText !== text
+    });
+  } catch (error) {
+    console.error("Spellcheck failed:", error?.message || error);
+    return res.status(500).json({ error: "Spellcheck service unavailable" });
   }
 });
 
