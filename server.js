@@ -214,6 +214,57 @@ function isLowSignalTranscript(text) {
   return /^(you|uh|um|hmm|huh|hmmm|hmmmmm|ok|okay)$/.test(normalized);
 }
 
+const TOPIC_ASPECTS = [
+  "fundamentals",
+  "real-world workflow",
+  "tools and implementation",
+  "debugging and troubleshooting",
+  "edge cases",
+  "trade-offs and decision making",
+  "performance and scalability",
+  "communication and collaboration"
+];
+
+function buildAspectProgress(history, questionNumber) {
+  const answeredCount = Array.isArray(history) ? history.length : 0;
+  const targetIndex = Math.max(0, Math.min(TOPIC_ASPECTS.length - 1, questionNumber - 1));
+  const focusAspect = TOPIC_ASPECTS[targetIndex] || TOPIC_ASPECTS[0];
+  const coveredAspects = TOPIC_ASPECTS.slice(0, Math.min(answeredCount, TOPIC_ASPECTS.length));
+
+  return {
+    focusAspect,
+    coveredAspects,
+    remainingAspects: TOPIC_ASPECTS.filter((item) => !coveredAspects.includes(item)),
+    allAspects: TOPIC_ASPECTS
+  };
+}
+
+function forceSingleQuestion(text, topic) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+
+  if (!raw) {
+    return `What is one practical example of ${topic}?`;
+  }
+
+  const cleaned = raw
+    .replace(/^[-*\d.)\s]+/, "")
+    .replace(/\b(Tip|Suggestion|Advice|Feedback)\s*:\s*.*/i, "")
+    .trim();
+
+  if (!cleaned) {
+    return `What is one practical example of ${topic}?`;
+  }
+
+  const firstSentence = cleaned.split(/(?<=[?.!])\s+/)[0] || cleaned;
+  const withoutTrailing = firstSentence.replace(/[.!]+$/, "").trim();
+
+  if (!withoutTrailing) {
+    return `What is one practical example of ${topic}?`;
+  }
+
+  return /\?$/.test(withoutTrailing) ? withoutTrailing : `${withoutTrailing}?`;
+}
+
 async function transcribeAudioFile(filePath, originalName, mimeType, options = {}) {
   const audioFile = await OpenAI.toFile(
     fs.createReadStream(filePath),
@@ -258,12 +309,13 @@ async function generateQuestion(topic, history, questionNumber, context = {}) {
   const scenario = (context.scenario || "").trim();
   const behavior = (context.behavior || "professional and balanced").trim();
   const languageStyle = getLanguageStyleRules(language, behavior);
+  const aspectProgress = buildAspectProgress(history, questionNumber);
 
   return createJsonChatCompletion(
     [
       {
         role: "system",
-        content: `You are doing strict role-play Q&A in the field/domain: ${topic}. The scenario defines WHO you are (for example HR, doctor, CEO, manager). You MUST become that person and stay in character for every question. Do not act like a generic practice bot and do not break persona. Ask exactly one question at a time. The question must be easy to answer verbally. Do not ask for typed code, punctuation-heavy syntax, or long written snippets. Prefer conceptual, scenario-based, and step-by-step explanation questions. Keep wording short, clear, and conversational. The interview language is ${language}. Always ask only in ${language}. Behavior style to apply: ${behavior}. ${languageStyle} Scenario/persona to mimic: ${scenario || "No extra context provided."}. Return JSON with keys: question, topic, difficulty.`
+        content: `You are doing strict role-play Q&A in the field/domain: ${topic}. The scenario defines WHO you are (for example HR, doctor, CEO, manager). You MUST become that person and stay in character for every question. Do not act like a generic practice bot and do not break persona. Ask exactly one question at a time, and return only one question. NEVER include suggestions, hints, feedback, coaching, evaluation, explanation, or extra lines. NEVER repeat any previous question intent already present in history. Each next question must cover a NEW topic aspect not already covered. Keep wording short, clear, and conversational for spoken answers. The question must be easy to answer verbally. Do not ask for typed code, punctuation-heavy syntax, or long written snippets. Prefer conceptual, scenario-based, and step-by-step explanation questions. The interview language is ${language}. Always ask only in ${language}. Behavior style to apply: ${behavior}. ${languageStyle} Scenario/persona to mimic: ${scenario || "No extra context provided."}. The question must end with '?'. Return JSON with keys: question, topic, difficulty.`
       },
       {
         role: "user",
@@ -273,6 +325,7 @@ async function generateQuestion(topic, history, questionNumber, context = {}) {
           scenario,
           behavior,
           questionNumber,
+          aspectPlan: aspectProgress,
           history
         })
       }
@@ -292,7 +345,7 @@ async function makeVoiceFriendlyQuestion(topic, question, language, behavior, sc
     [
       {
         role: "system",
-        content: `Rewrite interview questions for voice conversation in the field/domain ${topic}. Keep the same intent but make it naturally speakable. Stay in this exact scenario persona while phrasing: ${scenario || "Interviewer"}. The rewritten question must sound like it is asked by that person only. Rules: short sentence, no code blocks, no request for exact syntax, no special symbols-heavy prompt. If the original asks to write code, convert it to explain approach verbally. Output must be only in ${language || "English"}. ${languageStyle} Return JSON with key: question.`
+        content: `Rewrite interview questions for voice conversation in the field/domain ${topic}. Keep the exact intent but make it naturally speakable. Stay in this exact scenario persona while phrasing: ${scenario || "Interviewer"}. The rewritten question must sound like it is asked by that person only. Rules: output exactly one question only, no statements before or after, no advice, no hints, no feedback, no coaching text, no code blocks, no request for exact syntax, no symbols-heavy prompt. If the original asks to write code, convert it to explain approach verbally. Output must be only in ${language || "English"}. ${languageStyle} The final text must end with '?'. Return JSON with key: question.`
       },
       {
         role: "user",
@@ -304,16 +357,16 @@ async function makeVoiceFriendlyQuestion(topic, question, language, behavior, sc
     }
   );
 
-  const speakable = String(rewritten.question || question || "").trim();
+  const speakable = forceSingleQuestion(rewritten.question || question, topic);
   if (speakable) {
     return speakable;
   }
 
-  return `Please explain one practical concept related to ${topic}.`;
+  return forceSingleQuestion(`What is one practical concept related to ${topic}`, topic);
 }
 
 function fallbackQuestionText(topic) {
-  return `Please explain one practical concept related to ${topic}.`;
+  return `What is one practical concept related to ${topic}?`;
 }
 
 async function finalAssessment(topic, history, context = {}) {

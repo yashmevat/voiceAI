@@ -5,6 +5,64 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI HR Voice Interview</title>
   <style>
+        .tooltip-icon {
+          display: inline-block;
+          width: 18px;
+          height: 18px;
+          margin-left: 6px;
+          vertical-align: middle;
+          cursor: pointer;
+          color: var(--accent);
+          background: none;
+          border: none;
+          padding: 0;
+          font-size: 17px;
+          line-height: 1;
+          transition: color 0.2s;
+        }
+        .tooltip-icon:hover {
+          color: #22c55e;
+        }
+        .modal-backdrop {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0,0,0,0.38);
+          z-index: 1000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .modal {
+          background: #101a2b;
+          color: var(--text);
+          border-radius: 18px;
+          box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+          padding: 32px 28px 22px 28px;
+          max-width: 370px;
+          width: 90vw;
+          z-index: 1001;
+          position: relative;
+          font-size: 1rem;
+          animation: modalIn 0.18s cubic-bezier(.4,1.6,.6,1) 1;
+        }
+        @keyframes modalIn {
+          from { transform: scale(0.92) translateY(30px); opacity: 0; }
+          to { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        .modal-close {
+          position: absolute;
+          top: 12px;
+          right: 16px;
+          background: none;
+          border: none;
+          color: var(--muted);
+          font-size: 1.3rem;
+          cursor: pointer;
+          transition: color 0.2s;
+        }
+        .modal-close:hover {
+          color: var(--accent);
+        }
     :root {
       --bg: #07111f;
       --panel: rgba(12, 24, 41, 0.82);
@@ -363,7 +421,9 @@
   <div class="setup">
     <div class="setup-grid">
       <div>
-        <label for="languageInput">Language</label>
+        <label for="languageInput">Language
+          <button class="tooltip-icon" type="button" onclick="showTooltip('language')" aria-label="Language info">&#9432;</button>
+        </label>
         <select id="languageInput">
           <option value="English">English</option>
           <option value="Hindi">Hindi</option>
@@ -380,15 +440,21 @@
       </div>
       <button class="btn btn-primary" id="startButton" onclick="startInterview()">Start Interview</button>
       <div>
-        <label for="topicInput">Topic</label>
+        <label for="topicInput">Topic
+          <button class="tooltip-icon" type="button" onclick="showTooltip('topic')" aria-label="Topic info">&#9432;</button>
+        </label>
         <input id="topicInput" type="text" placeholder="Example: Salary negotiation" />
       </div>
       <div>
-        <label for="behaviorInput">Behaviour</label>
+        <label for="behaviorInput">Behaviour
+          <button class="tooltip-icon" type="button" onclick="showTooltip('behavior')" aria-label="Behavior info">&#9432;</button>
+        </label>
         <input id="behaviorInput" type="text" placeholder="Example: angry, strict, soft-hearted, supportive" />
       </div>
       <div style="grid-column: 1 / -1;">
-        <label for="scenarioInput">Scenario Prompt</label>
+        <label for="scenarioInput">Scenario Prompt
+          <button class="tooltip-icon" type="button" onclick="showTooltip('scenario')" aria-label="Scenario info">&#9432;</button>
+        </label>
         <textarea id="scenarioInput" placeholder="Example: You are HR. I am asking for a salary hike."></textarea>
         <div class="notice" id="setupNotice">Fill the setup fields, then start. The mic opens only for your answers.</div>
       </div>
@@ -448,10 +514,40 @@
 </div>
 
 <script>
+// Tooltip modal logic
+const TOOLTIP_TEXT = {
+  language: `Choose the language for the interview. Example: English, Hindi, etc. The AI will ask and speak in this language only.`,
+  topic: `Enter the main topic or skill for the interview. Example: Salary negotiation, Teamwork, JavaScript, etc.`,
+  behavior: `Describe the HR's behavior/personality. Example: strict, soft-hearted, supportive, rude, etc. You can use multiple words like 'rude and arrogant'.`,
+  scenario: `Describe the HR scenario in detail. Example: 'You are HR. I am asking for a salary hike.' Do not use shortforms or incomplete sentences. Be clear and specific about the situation.`
+};
+
+function showTooltip(field) {
+  const text = TOOLTIP_TEXT[field] || "No info available.";
+  const modal = document.createElement("div");
+  modal.className = "modal-backdrop";
+  modal.innerHTML = `
+    <div class="modal">
+      <button class="modal-close" onclick="closeTooltip(event)">&times;</button>
+      <div style="white-space:pre-line;">${text}</div>
+    </div>
+  `;
+  modal.onclick = (e) => {
+    if (e.target === modal) closeTooltip(e);
+  };
+  document.body.appendChild(modal);
+}
+
+function closeTooltip(e) {
+  const modal = e.target.closest('.modal-backdrop');
+  if (modal) modal.remove();
+}
 const API_BASE = window.location.hostname.includes("localhost")
   ? ""
   : "https://voiceai-3vgo.onrender.com";
 
+
+  console.log("api base is: " + API_BASE);
 const state = {
   interviewId: "",
   topic: "",
@@ -719,26 +815,48 @@ async function askQuestion(questionTextValue, questionAudio) {
   await startRecording();
 }
 
+function showFieldError(inputElem, message) {
+  let errorElem = inputElem.parentElement.querySelector('.field-error');
+  if (!errorElem) {
+    errorElem = document.createElement('div');
+    errorElem.className = 'field-error';
+    errorElem.style.color = '#f87171';
+    errorElem.style.fontSize = '13px';
+    errorElem.style.marginTop = '4px';
+    inputElem.parentElement.appendChild(errorElem);
+  }
+  errorElem.textContent = message;
+}
+
+function clearFieldError(inputElem) {
+  const errorElem = inputElem.parentElement.querySelector('.field-error');
+  if (errorElem) errorElem.remove();
+}
+
 async function startInterview() {
   const topic = topicInput.value.trim();
   const language = languageInput.value.trim() || "English";
   const scenario = scenarioInput.value.trim();
   const behavior = behaviorInput.value.trim();
 
+  let hasError = false;
+  clearFieldError(topicInput);
+  clearFieldError(scenarioInput);
+  clearFieldError(behaviorInput);
+
   if (!topic) {
-    alert("Please enter a topic.");
-    return;
+    showFieldError(topicInput, "This field is required");
+    hasError = true;
   }
-
   if (!scenario) {
-    alert("Please enter the scenario prompt.");
-    return;
+    showFieldError(scenarioInput, "This field is required");
+    hasError = true;
   }
-
   if (!behavior) {
-    alert("Please enter the HR behavior.");
-    return;
+    showFieldError(behaviorInput, "This field is required");
+    hasError = true;
   }
+  if (hasError) return;
 
   setBusy(true);
   finalPanel.classList.add("hidden");
@@ -790,7 +908,6 @@ async function startInterview() {
     updateQuestionView(data.question, data.questionNumber);
     await askQuestion(data.question, data.questionAudio);
   } catch (error) {
-    alert(error.message);
     setStatus("Error", "var(--bad)");
     setRecordingState(false);
     state.captureMode = null;
@@ -810,8 +927,9 @@ async function submitNextAnswer() {
   try {
     const answerBlob = await stopRecording();
 
-    if (!answerBlob) {
-      throw new Error("No recorded answer found. Please answer and try again.");
+    if (!answerBlob || answerBlob.size === 0) {
+      alert("Say something before going next.");
+      return;
     }
 
     setRecordingState(false);
