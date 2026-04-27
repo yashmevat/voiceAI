@@ -57,10 +57,15 @@ function matchTokenCase(source, target) {
   return target;
 }
 
-function getCorrectionForToken(spell, token) {
+function getCorrectionForToken(spell, token, exemptTokens = new Set()) {
   const cleanToken = String(token || "").trim();
+  const normalizedToken = cleanToken.toLowerCase();
 
   if (!cleanToken || cleanToken.length < 2 || /\d/.test(cleanToken)) {
+    return cleanToken;
+  }
+
+  if (exemptTokens.has(normalizedToken)) {
     return cleanToken;
   }
 
@@ -699,6 +704,11 @@ app.post("/api/interview/finish", async (req, res) => {
 app.post("/api/spellcheck", async (req, res) => {
   try {
     const text = String(req.body?.text || "");
+    const exemptTokens = new Set(
+      Array.isArray(req.body?.exemptTokens)
+        ? req.body.exemptTokens.map((token) => String(token || "").trim().toLowerCase()).filter(Boolean)
+        : []
+    );
 
     if (!text.trim()) {
       return res.json({ correctedText: text, changed: false });
@@ -706,7 +716,7 @@ app.post("/api/spellcheck", async (req, res) => {
 
     const spell = await loadEnglishSpellChecker();
     const correctedText = text.replace(/[A-Za-z']+/g, (token) => {
-      return getCorrectionForToken(spell, token);
+      return getCorrectionForToken(spell, token, exemptTokens);
     });
 
     return res.json({
