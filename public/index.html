@@ -927,6 +927,7 @@ async function startInterview() {
   progressPill.innerHTML = "Questions answered: <strong>0</strong>";
 
   try {
+    await unlockAudioPlayback();
     await ensureMicrophone();
     await unlockAudioPlayback();
     
