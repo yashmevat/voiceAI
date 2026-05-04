@@ -738,6 +738,21 @@ async function ensureMicrophone() {
   return state.mediaStream;
 }
 
+async function requestMicrophoneOnLoad() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return;
+  }
+
+  try {
+    setupNotice.textContent = "Please allow microphone access when prompted.";
+    state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    setupNotice.textContent = "Microphone permission granted. Fill the setup fields, then start.";
+  } catch (error) {
+    console.log("Mic permission on load note:", error.message);
+    setupNotice.textContent = "Fill the setup fields, then start. Mic permission will be requested when needed.";
+  }
+}
+
 function base64ToBlobUrl(base64, mimeType = "audio/mpeg") {
   const binary = window.atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -1136,6 +1151,7 @@ async function endInterview() {
 }
 
 renderHistory();
+requestMicrophoneOnLoad();
 </script>
 
 <script src="./spellcheck.js"></script>
