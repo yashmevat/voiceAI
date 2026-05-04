@@ -588,31 +588,12 @@ const statusPill = document.getElementById("statusPill");
 const micPill = document.getElementById("micPill");
 const stepNotice = document.getElementById("stepNotice");
 
-// Create persistent audio element for iOS compatibility
-let audioElement = document.createElement("audio");
+const audioElement = document.createElement("audio");
 audioElement.setAttribute("playsinline", "");
 audioElement.setAttribute("webkit-playsinline", "");
+audioElement.preload = "auto";
 audioElement.style.display = "none";
 document.body.appendChild(audioElement);
-
-let audioContext = null;
-
-async function initializeAudioContext() {
-  if (audioContext) return audioContext;
-  
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    audioContext = new AudioContext();
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume();
-      console.log("✓ AudioContext initialized and resumed");
-    }
-    return audioContext;
-  } catch (err) {
-    console.log("AudioContext init note:", err.message);
-    return null;
-  }
-}
 
 function setBusy(isBusy) {
   state.busy = isBusy;
@@ -702,96 +683,46 @@ async function ensureMicrophone() {
   return state.mediaStream;
 }
 
-function useSpeechSynthesis(text, timer, done) {
-  if (!text || !("speechSynthesis" in window)) {
-    window.clearTimeout(timer);
-    done();
-    return;
+function base64ToBlobUrl(base64, mimeType = "audio/mpeg") {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
   }
-  
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.0;
-  utterance.pitch = 1.0;
-  utterance.volume = 1.0;
-  
-  utterance.onend = () => {
-    console.log("✓ Speech synthesis ended");
-    window.clearTimeout(timer);
-    done();
-  };
-  
-  utterance.onerror = () => {
-    console.error("✗ Speech synthesis error");
-    window.clearTimeout(timer);
-    done();
-  };
-  
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utterance);
+
+  const blob = new Blob([bytes], { type: mimeType });
+  return URL.createObjectURL(blob);
 }
 
-function playAudio(base64, fallbackText) {
+async function playAudio(base64) {
+  if (!base64) {
+    return;
+  }
+
   return new Promise((resolve) => {
-    let settled = false;
-    const done = () => {
-      if (!settled) {
-        settled = true;
-        resolve();
-      }
+    const audioUrl = base64ToBlobUrl(base64);
+    audioElement.pause();
+    audioElement.currentTime = 0;
+    audioElement.src = audioUrl;
+
+    const cleanup = () => {
+      audioElement.onended = null;
+      audioElement.onerror = null;
+      URL.revokeObjectURL(audioUrl);
+      resolve();
     };
 
-    // Safety timeout: never block interview flow on media playback issues.
-    const timer = window.setTimeout(done, 20000);
+    audioElement.onended = cleanup;
+    audioElement.onerror = () => {
+      cleanup();
+    };
 
-    if (base64) {
-      try {
-        // Use persistent audio element for iOS compatibility
-        audioElement.volume = 1.0;
-        audioElement.src = `data:audio/mpeg;base64,${base64}`;
-        
-        audioElement.onended = () => {
-          console.log("✓ Audio playback ended successfully");
-          window.clearTimeout(timer);
-          audioElement.src = "";
-          done();
-        };
-        
-        audioElement.onerror = (e) => {
-          console.error("✗ Audio element error, trying speech synthesis:", e);
-          window.clearTimeout(timer);
-          audioElement.src = "";
-          useSpeechSynthesis(fallbackText, timer, done);
-        };
-
-        const playPromise = audioElement.play();
-        if (playPromise && typeof playPromise.catch === "function") {
-          playPromise
-            .then(() => {
-              console.log("✓ Audio playback started");
-            })
-            .catch((e) => {
-              console.error("✗ Audio play rejected on iOS/mobile, using speech synthesis:", e.message);
-              window.clearTimeout(timer);
-              audioElement.src = "";
-              useSpeechSynthesis(fallbackText, timer, done);
-            });
-        }
-      } catch (err) {
-        console.error("✗ Audio setup error:", err.message);
-        window.clearTimeout(timer);
-        useSpeechSynthesis(fallbackText, timer, done);
-      }
-      return;
-    }
-
-    if (fallbackText && "speechSynthesis" in window) {
-      console.log("→ Using speech synthesis (no base64 provided)");
-      useSpeechSynthesis(fallbackText, timer, done);
-      return;
-    }
-
-    window.clearTimeout(timer);
-    done();
+    audioElement.play().catch(() => {
+      audioElement.pause();
+      audioElement.currentTime = 0;
+      cleanup();
+    });
   });
 }
 
@@ -852,7 +783,7 @@ async function askQuestion(questionTextValue, questionAudio) {
   state.captureMode = null;
   setStatus("AI speaking", "var(--accent)");
   stepNotice.textContent = "Listen to the question, then click 'Start giving answer' when ready to record your response.";
-  await playAudio(questionAudio, questionTextValue);
+  await playAudio(questionAudio);
   setStatus("Ready for answer", "var(--good)");
   stepNotice.textContent = "Question done. Click 'Start giving answer' to begin recording your response.";
 }
@@ -927,7 +858,6 @@ async function startInterview() {
 
   try {
     await ensureMicrophone();
-    await initializeAudioContext();
     
     const response = await fetch(`${API_BASE}/api/interview/start`, {
       method: "POST",
@@ -1089,7 +1019,7 @@ async function finishInterview() {
 
     setStatus(assessment.canProceed ? "Ready" : "Needs practice", assessment.canProceed ? "var(--good)" : "var(--bad)");
     stepNotice.textContent = "Final assessment complete.";
-    await playAudio(data.assessmentAudio, `${assessment.verdict}. ${assessment.summary} Recommendation: ${assessment.recommendation}.`);
+    await playAudio(data.assessmentAudio);
 
     state.interviewId = "";
     state.currentQuestion = "";
