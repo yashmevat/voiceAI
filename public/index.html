@@ -595,6 +595,50 @@ audioElement.preload = "auto";
 audioElement.style.display = "none";
 document.body.appendChild(audioElement);
 
+const RECORDING_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/aac"
+];
+
+function getSupportedRecordingMimeType() {
+  if (!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+
+  return RECORDING_MIME_TYPES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || "";
+}
+
+let audioContext = null;
+
+async function unlockAudioPlayback() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+      return;
+    }
+
+    if (!audioContext) {
+      audioContext = new AudioContext();
+    }
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    gainNode.gain.value = 0;
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.01);
+  } catch (error) {
+    console.log("Audio unlock note:", error.message);
+  }
+}
+
 function setBusy(isBusy) {
   state.busy = isBusy;
   document.body.classList.toggle("loading", isBusy);
@@ -705,6 +749,7 @@ async function playAudio(base64) {
     audioElement.pause();
     audioElement.currentTime = 0;
     audioElement.src = audioUrl;
+    audioElement.load();
 
     const cleanup = () => {
       audioElement.onended = null;
@@ -730,7 +775,11 @@ async function startRecording() {
   await ensureMicrophone();
   state.audioChunks = [];
   state.captureMode = "answer";
-  state.mediaRecorder = new MediaRecorder(state.mediaStream);
+
+  const mimeType = getSupportedRecordingMimeType();
+  state.mediaRecorder = mimeType
+    ? new MediaRecorder(state.mediaStream, { mimeType })
+    : new MediaRecorder(state.mediaStream);
 
   state.mediaRecorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
@@ -738,10 +787,19 @@ async function startRecording() {
     }
   };
 
-  state.mediaRecorder.start();
-  setRecordingState(true);
-  setStatus("Listening", "var(--good)");
-  stepNotice.textContent = "Speak your answer, then click Next to send it.";
+  state.mediaRecorder.onstart = () => {
+    setRecordingState(true);
+    setStatus("Listening", "var(--good)");
+    stepNotice.textContent = "Speak your answer, then click Next to send it.";
+  };
+
+  state.mediaRecorder.onerror = () => {
+    setRecordingState(false);
+    setStatus("Error", "var(--bad)");
+    stepNotice.textContent = "Recording failed on this device. Please try again.";
+  };
+
+  state.mediaRecorder.start(1000);
 }
 
 function stopRecording() {
@@ -752,8 +810,9 @@ function stopRecording() {
     }
 
     state.mediaRecorder.onstop = () => {
+      const blobType = state.mediaRecorder.mimeType || state.audioChunks[0]?.type || "audio/webm";
       const blob = new Blob(state.audioChunks, {
-        type: state.mediaRecorder.mimeType || "audio/webm"
+        type: blobType
       });
       resolve(blob);
     };
@@ -858,6 +917,7 @@ async function startInterview() {
 
   try {
     await ensureMicrophone();
+    await unlockAudioPlayback();
     
     const response = await fetch(`${API_BASE}/api/interview/start`, {
       method: "POST",
