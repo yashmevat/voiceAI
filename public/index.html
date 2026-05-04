@@ -676,6 +676,34 @@ async function ensureMicrophone() {
   return state.mediaStream;
 }
 
+function useSpeechSynthesis(text, timer, done) {
+  if (!text || !("speechSynthesis" in window)) {
+    window.clearTimeout(timer);
+    done();
+    return;
+  }
+  
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+  
+  utterance.onend = () => {
+    console.log("✓ Speech synthesis ended");
+    window.clearTimeout(timer);
+    done();
+  };
+  
+  utterance.onerror = () => {
+    console.error("✗ Speech synthesis error");
+    window.clearTimeout(timer);
+    done();
+  };
+  
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+}
+
 function playAudio(base64, fallbackText) {
   return new Promise((resolve) => {
     let settled = false;
@@ -691,66 +719,36 @@ function playAudio(base64, fallbackText) {
 
     if (base64) {
       const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
+      audio.volume = 1.0;
+      
       audio.onended = () => {
+        console.log("✓ Audio playback ended successfully");
         window.clearTimeout(timer);
         done();
       };
-      audio.onerror = () => {
-        if (fallbackText && "speechSynthesis" in window) {
-          const utterance = new SpeechSynthesisUtterance(fallbackText);
-          utterance.onend = () => {
-            window.clearTimeout(timer);
-            done();
-          };
-          utterance.onerror = () => {
-            window.clearTimeout(timer);
-            done();
-          };
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(utterance);
-        } else {
-          window.clearTimeout(timer);
-          done();
-        }
+      
+      audio.onerror = (e) => {
+        console.error("✗ Audio playback error, trying speech synthesis:", e);
+        useSpeechSynthesis(fallbackText, timer, done);
       };
 
       const playPromise = audio.play();
       if (playPromise && typeof playPromise.catch === "function") {
-        playPromise.catch(() => {
-          if (fallbackText && "speechSynthesis" in window) {
-            const utterance = new SpeechSynthesisUtterance(fallbackText);
-            utterance.onend = () => {
-              window.clearTimeout(timer);
-              done();
-            };
-            utterance.onerror = () => {
-              window.clearTimeout(timer);
-              done();
-            };
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(utterance);
-          } else {
-            window.clearTimeout(timer);
-            done();
-          }
-        });
+        playPromise
+          .then(() => {
+            console.log("✓ Audio playback started");
+          })
+          .catch((e) => {
+            console.error("✗ Audio blocked on iOS/mobile, using speech synthesis:", e.message);
+            useSpeechSynthesis(fallbackText, timer, done);
+          });
       }
-
       return;
     }
 
     if (fallbackText && "speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(fallbackText);
-      utterance.onend = () => {
-        window.clearTimeout(timer);
-        done();
-      };
-      utterance.onerror = () => {
-        window.clearTimeout(timer);
-        done();
-      };
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
+      console.log("→ Using speech synthesis (no base64 provided)");
+      useSpeechSynthesis(fallbackText, timer, done);
       return;
     }
 
@@ -891,6 +889,20 @@ async function startInterview() {
 
   try {
     await ensureMicrophone();
+    
+    // Initialize audio context for iOS compatibility
+    try {
+      if (window.AudioContext || window.webkitAudioContext) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioContext = new AudioContext();
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+          console.log("✓ AudioContext resumed for iOS");
+        }
+      }
+    } catch (err) {
+      console.log("AudioContext note:", err.message);
+    }
 
     const response = await fetch(`${API_BASE}/api/interview/start`, {
       method: "POST",
