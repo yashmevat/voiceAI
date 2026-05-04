@@ -476,6 +476,7 @@
       <p class="meta" id="questionMeta">The AI speaks in your selected language, then your microphone opens automatically for your answer.</p>
 
       <div class="controls">
+        <button class="btn btn-primary hidden" id="startAnswerButton" onclick="beginRecording()">Start giving answer</button>
         <button class="btn btn-primary hidden" id="nextButton" onclick="submitNextAnswer()">Next</button>
         <button class="btn btn-secondary hidden" id="finishButton" onclick="endInterview()">End Session</button>
       </div>
@@ -575,6 +576,7 @@ const workspacePanel = document.getElementById("workspacePanel");
 const finalPanel = document.getElementById("finalPanel");
 const questionText = document.getElementById("questionText");
 const questionMeta = document.getElementById("questionMeta");
+const startAnswerButton = document.getElementById("startAnswerButton");
 const nextButton = document.getElementById("nextButton");
 const finishButton = document.getElementById("finishButton");
 const historyList = document.getElementById("historyList");
@@ -590,6 +592,7 @@ function setBusy(isBusy) {
   state.busy = isBusy;
   document.body.classList.toggle("loading", isBusy);
   startButton.disabled = isBusy;
+  startAnswerButton.disabled = isBusy;
   nextButton.disabled = isBusy;
   finishButton.disabled = isBusy;
 }
@@ -606,7 +609,9 @@ function setRecordingState(isRecording) {
   const hasActiveQuestion = Boolean(state.currentQuestion);
   const hasActiveSession = Boolean(state.interviewId);
 
-  nextButton.classList.toggle("hidden", !hasActiveQuestion);
+  startAnswerButton.classList.toggle("hidden", isRecording || !hasActiveQuestion);
+  startAnswerButton.disabled = state.busy;
+  nextButton.classList.toggle("hidden", !isRecording || !hasActiveQuestion);
   nextButton.disabled = state.busy;
   finishButton.classList.toggle("hidden", !hasActiveSession);
   finishButton.disabled = state.busy;
@@ -810,8 +815,13 @@ async function askQuestion(questionTextValue, questionAudio) {
   setRecordingState(false);
   state.captureMode = null;
   setStatus("AI speaking", "var(--accent)");
-  stepNotice.textContent = "Listen to the question, then answer when the microphone opens.";
+  stepNotice.textContent = "Listen to the question, then click 'Start giving answer' when ready to record your response.";
   await playAudio(questionAudio, questionTextValue);
+  setStatus("Ready for answer", "var(--good)");
+  stepNotice.textContent = "Question done. Click 'Start giving answer' to begin recording your response.";
+}
+
+async function beginRecording() {
   await startRecording();
 }
 
