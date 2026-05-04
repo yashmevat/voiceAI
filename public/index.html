@@ -755,7 +755,7 @@ async function playAudio(base64) {
     return;
   }
 
-  return new Promise((resolve) => {
+  const tryPlay = () => new Promise((resolve) => {
     const audioUrl = base64ToBlobUrl(base64);
     audioElement.pause();
     audioElement.currentTime = 0;
@@ -766,20 +766,30 @@ async function playAudio(base64) {
       audioElement.onended = null;
       audioElement.onerror = null;
       URL.revokeObjectURL(audioUrl);
-      resolve();
+      resolve(true);
     };
 
     audioElement.onended = cleanup;
     audioElement.onerror = () => {
-      cleanup();
+      URL.revokeObjectURL(audioUrl);
+      resolve(false);
     };
 
-    audioElement.play().catch(() => {
+    audioElement.play().then(() => {
+      resolve(true);
+    }).catch(() => {
       audioElement.pause();
       audioElement.currentTime = 0;
-      cleanup();
+      URL.revokeObjectURL(audioUrl);
+      resolve(false);
     });
   });
+
+  const firstAttempt = await tryPlay();
+  if (!firstAttempt) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await tryPlay();
+  }
 }
 
 async function startRecording() {

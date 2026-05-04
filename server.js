@@ -229,8 +229,15 @@ async function safeSpeakText(text, options = {}) {
   try {
     return await speakText(text, options);
   } catch (error) {
-    console.error("TTS failed:", error?.message || error);
-    return null;
+    console.error("TTS failed on first attempt:", error?.message || error);
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return await speakText(text, options);
+    } catch (retryError) {
+      console.error("TTS failed after retry:", retryError?.message || retryError);
+      return null;
+    }
   }
 }
 
