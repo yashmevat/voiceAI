@@ -122,23 +122,26 @@ async function unlockAudioPlayback() {
     oscillator.start();
     oscillator.stop(audioContext.currentTime + 0.01);
     
-    // For iOS Chrome, add a second micro-burst after a short delay
+    // For iOS Chrome, add a second micro-burst after a short delay and wait for it
     if (/iPhone|iPad|iPod|Chrome/i.test(navigator.userAgent)) {
-      setTimeout(() => {
-        try {
-          if (audioContext.state === "running") {
-            const osc = audioContext.createOscillator();
-            const gain = audioContext.createGain();
-            gain.gain.value = 0;
-            osc.connect(gain);
-            gain.connect(audioContext.destination);
-            osc.start(audioContext.currentTime);
-            osc.stop(audioContext.currentTime + 0.001);
+      await new Promise((resolve) => {
+        setTimeout(() => {
+          try {
+            if (audioContext.state === "running") {
+              const osc = audioContext.createOscillator();
+              const gain = audioContext.createGain();
+              gain.gain.value = 0;
+              osc.connect(gain);
+              gain.connect(audioContext.destination);
+              osc.start(audioContext.currentTime);
+              osc.stop(audioContext.currentTime + 0.001);
+            }
+          } catch (e) {
+            // Silent fail for the secondary unlock
           }
-        } catch (e) {
-          // Silent fail for the secondary unlock
-        }
-      }, 10);
+          resolve();
+        }, 15);
+      });
     }
   } catch (error) {
     console.log("Audio unlock note:", error.message);
@@ -297,12 +300,14 @@ async function playAudio(base64) {
 
   // Unlock audio context right before playback for iOS Chrome
   await unlockAudioPlayback();
+  // Wait a bit for the unlock to fully settle on iOS
+  await new Promise((resolve) => setTimeout(resolve, 20));
   
   const firstAttempt = await tryPlay();
   if (!firstAttempt) {
     // Retry with additional unlock for iOS
     await unlockAudioPlayback();
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 250));
     await tryPlay();
   }
 }
