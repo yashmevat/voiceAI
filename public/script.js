@@ -98,11 +98,10 @@ let audioContext = null;
 async function unlockAudioPlayback() {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) {
-      return;
-    }
+    if (!AudioContext) return;
 
-    if (!audioContext) {
+    // ✅ Always create a fresh context on first call, don't reuse a stale suspended one
+    if (!audioContext || audioContext.state === "closed") {
       audioContext = new AudioContext();
     }
 
@@ -110,6 +109,7 @@ async function unlockAudioPlayback() {
       await audioContext.resume();
     }
 
+    // Warm-up tick
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
     gainNode.gain.value = 0;
@@ -121,7 +121,6 @@ async function unlockAudioPlayback() {
     console.log("Audio unlock note:", error.message);
   }
 }
-
 function setBusy(isBusy) {
   state.busy = isBusy;
   document.body.classList.toggle("loading", isBusy);
@@ -424,7 +423,7 @@ async function startInterview() {
   progressPill.innerHTML = "Questions answered: <strong>0</strong>";
 
   try {
-    await unlockAudioPlayback();
+    // await unlockAudioPlayback();
     await ensureMicrophone();
     await unlockAudioPlayback();
     
