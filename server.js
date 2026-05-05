@@ -253,7 +253,7 @@ function languageToWhisperCode(language) {
     gujarati: "gu",
     kannada: "kn",
     malayalam: "ml",
-    punjabi: "pu",
+    punjabi: "pa",
     urdu: "ur"
   };
 
@@ -279,29 +279,76 @@ function isLowSignalTranscript(text) {
 }
 
 const TOPIC_ASPECTS = [
-  "fundamentals",
-  "real-world workflow",
-  "tools and implementation",
-  "debugging and troubleshooting",
-  "edge cases",
-  "trade-offs and decision making",
-  "performance and scalability",
-  "communication and collaboration"
+  // ── Knowledge & Understanding ────────────────────
+  "core concepts and fundamentals",           // basic knowledge of the domain
+  "depth of understanding",                   // theory, principles, how things work
+  "domain-specific terminology and accuracy", // correct use of field terms
+
+  // ── Practical Experience ─────────────────────────
+  "real-world experience and examples",       // what they have actually done
+  "hands-on skills and execution",            // how they do things practically
+  "tools, methods and resources used",        // what they use to get work done
+
+  // ── Problem Solving ──────────────────────────────
+  "handling challenges and obstacles",        // how they deal with difficulties
+  "troubleshooting and finding root causes",  // diagnosing what went wrong
+  "edge cases and unexpected situations",     // what if things go wrong/unusual
+
+  // ── Decision Making ──────────────────────────────
+  "decision making and reasoning",            // why they chose one thing over another
+  "trade-offs and alternative approaches",    // awareness of other options
+  "risk awareness and safety",                // what could go wrong, how to prevent
+
+  // ── Quality & Standards ──────────────────────────
+  "quality, accuracy and attention to detail",// how careful and precise they are
+  "process, planning and organization",       // how they structure their work
+  "learning, growth and self-improvement",    // how they stay updated/improve
+
+  // ── People & Collaboration ───────────────────────
+  "teamwork and collaboration",               // working with others
+  "communication and explanation skills",     // how clearly they explain things
+  "leadership and ownership",                 // taking responsibility, guiding others
 ];
 
 function buildAspectProgress(history, questionNumber) {
   const answeredCount = Array.isArray(history) ? history.length : 0;
-  const targetIndex = Math.max(0, Math.min(TOPIC_ASPECTS.length - 1, questionNumber - 1));
-  const focusAspect = TOPIC_ASPECTS[targetIndex] || TOPIC_ASPECTS[0];
-  const coveredAspects = TOPIC_ASPECTS.slice(0, Math.min(answeredCount, TOPIC_ASPECTS.length));
+
+  const consecutiveCrossQuestions = (() => {
+    let count = 0;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if ((history[i].mode || "new_aspect") === "cross_question") count++;
+      else break;
+    }
+    return count;
+  })();
+
+  const forceNewAspect = consecutiveCrossQuestions >= 2;
+
+  // Slower progression: every ~2 answers = 1 new aspect (allows 1-2 cross-questions per aspect)
+  const aspectIndex = Math.min(
+    Math.floor(answeredCount / 2),
+    TOPIC_ASPECTS.length - 1
+  );
+
+  const coveredAspects = TOPIC_ASPECTS.slice(0, aspectIndex);
+
+  // If forced new aspect, focus on next uncovered one
+  const focusIndex = forceNewAspect
+    ? Math.min(aspectIndex, TOPIC_ASPECTS.length - 1)
+    : Math.min(questionNumber - 1, TOPIC_ASPECTS.length - 1);
+
+  const focusAspect = TOPIC_ASPECTS[focusIndex] || TOPIC_ASPECTS[aspectIndex] || TOPIC_ASPECTS[0];
 
   return {
     focusAspect,
     coveredAspects,
-    remainingAspects: TOPIC_ASPECTS.filter((item) => !coveredAspects.includes(item)),
-    allAspects: TOPIC_ASPECTS
+    remainingAspects: TOPIC_ASPECTS.filter(a => !coveredAspects.includes(a)),
+    allAspects: TOPIC_ASPECTS,
+    consecutiveCrossQuestions,
+    forceNewAspect
   };
 }
+
 
 function forceSingleQuestion(text, topic) {
   const raw = String(text || "").replace(/\s+/g, " ").trim();
@@ -375,11 +422,67 @@ async function generateQuestion(topic, history, questionNumber, context = {}) {
   const languageStyle = getLanguageStyleRules(language, behavior);
   const aspectProgress = buildAspectProgress(history, questionNumber);
 
+  const lastEntry = history.length > 0 ? history[history.length - 1] : null;
+
+  // Count consecutive cross-questions from history
+  const recentCrossCount = aspectProgress.consecutiveCrossQuestions;
+
+  // Build last few exchanges for context (max 3)
+  const recentHistory = history.slice(-3).map((h, i) =>
+    `Q: ${h.question}\nA: ${h.answer}\nMode: ${h.mode || "new_aspect"}`
+  ).join("\n---\n");
+
   return createJsonChatCompletion(
     [
       {
         role: "system",
-        content: `You are doing strict role-play Q&A in the field/domain: ${topic}. The scenario defines WHO you are (for example HR, doctor, CEO, manager). You MUST become that person and stay in character for every question. Do not act like a generic practice bot and do not break persona. Ask exactly one question at a time, and return only one question. NEVER include suggestions, hints, feedback, coaching, evaluation, explanation, or extra lines. NEVER repeat any previous question intent already present in history. Each next question must cover a NEW topic aspect not already covered. Keep wording short, clear, and conversational for spoken answers. The question must be easy to answer verbally. Do not ask for typed code, punctuation-heavy syntax, or long written snippets. Prefer conceptual, scenario-based, and step-by-step explanation questions. The interview language is ${language}. Always ask only in ${language}. Behavior style to apply: ${behavior}. ${languageStyle} Scenario/persona to mimic: ${scenario || "No extra context provided."}. The question must end with '?'. Return JSON with keys: question, topic, difficulty.`
+        content: `You are conducting a REAL spoken interview for the domain: "${topic}".
+Persona: ${scenario || "Senior Interviewer"}. Stay in character. Never break persona.
+
+══════════════════════════════════════════════
+YOUR ONLY JOB: Ask the SINGLE best next question
+══════════════════════════════════════════════
+
+STEP 1 — READ THE LAST ANSWER CAREFULLY:
+${lastEntry
+  ? `Last Question: "${lastEntry.question}"
+Last Answer: "${lastEntry.answer}"`
+  : "This is the first question. Ask about fundamentals."}
+
+STEP 2 — DECIDE: Cross-question OR New Aspect?
+
+CROSS-QUESTION if ANY of these are true about the last answer:
+  ✓ Answer was vague ("it handles async stuff", "it's used for performance")
+  ✓ Candidate made a claim but gave no example ("I've used Redis in production")
+  ✓ Answer had a factual error or assumption worth challenging
+  ✓ Answer was incomplete — stopped midway or skipped key part
+  ✓ Candidate said something interesting worth digging into
+  → Cross-question examples:
+    - "You mentioned Redis — what specific eviction policy did you use and why?"
+    - "You said it improves performance — can you walk me through a specific case where it did?"
+    - "That's not quite right — can you reconsider how the event loop handles microtasks?"
+
+NEW ASPECT if ALL of these are true:
+  ✓ Last answer was clear, accurate, and reasonably complete
+  ✓ OR cross-questioning has already happened ${recentCrossCount >= 2 ? "2+ times in a row (MUST move on now)" : `${recentCrossCount} time(s) recently`}
+  → Next uncovered aspect to focus on: "${aspectProgress.focusAspect}"
+  → Already covered: ${aspectProgress.coveredAspects.join(", ") || "none yet"}
+  → Remaining: ${aspectProgress.remainingAspects.join(", ")}
+
+${recentCrossCount >= 2
+  ? "⚠️ FORCED: You have cross-questioned 2 times in a row. You MUST ask about a NEW aspect now. Do NOT cross-question again."
+  : ""}
+
+STEP 3 — STRICT QUESTION RULES:
+- Ask EXACTLY ONE question. Never multi-part.
+- No hints, feedback, tips, coaching, or praise.
+- No code blocks or syntax. Prefer verbal explanation.
+- Question must end with '?'
+- Language: ${language}. ${languageStyle}
+- Sound like a REAL interviewer continuing a live conversation, not reading from a list.
+
+Return JSON: { question, topic, difficulty, mode }
+where mode = "cross_question" OR "new_aspect" (your decision based on STEP 2)`
       },
       {
         role: "user",
@@ -390,14 +493,19 @@ async function generateQuestion(topic, history, questionNumber, context = {}) {
           behavior,
           questionNumber,
           aspectPlan: aspectProgress,
-          history
+          recentHistory,
+          lastAnswer: lastEntry?.answer || null,
+          lastQuestion: lastEntry?.question || null,
+          consecutiveCrossQuestions: recentCrossCount,
+          forceNewAspect: aspectProgress.forceNewAspect
         })
       }
     ],
     {
-      question: `Question ${questionNumber} for ${topic}`,
+      question: `Tell me about your experience with ${topic}.`,
       topic,
-      difficulty: 5
+      difficulty: 5,
+      mode: "new_aspect"
     }
   );
 }
@@ -422,9 +530,7 @@ async function makeVoiceFriendlyQuestion(topic, question, language, behavior, sc
   );
 
   const speakable = forceSingleQuestion(rewritten.question || question, topic);
-  if (speakable) {
-    return speakable;
-  }
+return speakable; // direct return, no if needed
 
   return forceSingleQuestion(`What is one practical concept related to ${topic}`, topic);
 }
@@ -438,11 +544,99 @@ async function finalAssessment(topic, history, context = {}) {
   const scenario = (context.scenario || "").trim();
   const behavior = (context.behavior || "professional and balanced").trim();
 
+  const answersBlock = history
+    .map((entry, i) =>
+      `Q${i + 1}: ${entry.question}\nA${i + 1}: ${String(entry.answer || "(no answer given)").trim()}`
+    )
+    .join("\n\n");
+
   return createJsonChatCompletion(
     [
       {
         role: "system",
-        content: `You are giving a final hiring-style assessment for an interview in the field/domain ${topic}. Decide whether the candidate is ready to work in this field/domain based on the conversation so far. The interview language is ${language}, so all output must be in ${language}. Use this scenario context: ${scenario || "No extra context provided."}. The interviewer behavior used was: ${behavior}. Return JSON with keys: canProceed, verdict, overallScore, summary, strengths, gaps, recommendation. IMPORTANT: overallScore must be a number strictly between 0 and 10 (not percentage, not out of 100).`
+        content: `You are a strict, honest hiring evaluator for the domain: "${topic}".
+You will receive numbered Q&A pairs from a voice interview. Evaluate EVERY answer honestly based on what was ACTUALLY said — not what the candidate might have meant.
+
+═══════════════════════════════════════
+SCORING RUBRIC — perAnswerScore (0–10)
+═══════════════════════════════════════
+0.0 – 1.0  → Answer is completely off-topic, random, or the candidate said nothing meaningful. No connection to the question at all.
+              EXAMPLE: Asked "What is the event loop?" → Answers "I like JavaScript" or gives unrelated words.
+
+1.0 – 2.5  → Answer is almost entirely wrong or irrelevant. Candidate clearly does not know the topic.
+              EXAMPLE: Asked "What is the event loop?" → "It's a loop that runs events in a server."
+
+2.5 – 4.0  → Candidate drops buzzwords or vague phrases but shows no real understanding. Surface-level only.
+              EXAMPLE: Asked "What is the event loop?" → "It handles async stuff and callbacks somehow."
+
+4.0 – 5.5  → Basic awareness. Candidate is in the right direction but misses key details or depth.
+              EXAMPLE: Asked "What is the event loop?" → "It processes tasks in a queue, I think it's related to async code."
+
+5.5 – 7.0  → Decent answer. Mostly correct with minor gaps or unclear explanation.
+              EXAMPLE: Asked "What is the event loop?" → "It processes the call stack and callback queue, letting Node handle async code without blocking."
+
+7.0 – 8.5  → Good answer. Clear, accurate, demonstrates solid understanding.
+              EXAMPLE: Asked "What is the event loop?" → Correctly explains call stack, web APIs, callback queue, and microtask queue distinction.
+
+8.5 – 10.0 → Expert answer. Insightful, complete, uses real examples or edge cases confidently.
+              EXAMPLE: Asked "What is the event loop?" → Above plus explains microtask priority over macrotasks, gives a real scenario.
+
+═══════════════════════════════════════
+STRICT RULES — YOU MUST FOLLOW THESE
+═══════════════════════════════════════
+1. Score EVERY answer individually in perAnswerScores. Do NOT skip any.
+2. NEVER default to 5. If you are tempted to give 5, re-read the answer and pick a more precise score.
+3. overallScore = weighted average of perAnswerScores. Do the math explicitly.
+4. A candidate who answers 4 questions irrelevantly and 1 correctly scores below 3.0 overall.
+5. A candidate who answers mostly well but fumbles one question should still score 6.5+.
+6. canProceed = true ONLY if overallScore >= 6.5 AND most answers are relevant and correct.
+7. strengths = only list things the candidate ACTUALLY demonstrated. If nothing was good, return [].
+8. gaps = be specific. Do not write "needs improvement". Write "Could not explain event loop correctly".
+
+═══════════════════════════════════════
+VOICE TRANSCRIPTION TOLERANCE ← NEW
+═══════════════════════════════════════
+These answers were captured from SPOKEN audio and auto-transcribed by Whisper AI.
+Transcription errors are very common in voice interviews. You MUST account for this:
+
+- Evaluate the MEANING and INTENT of the answer, not the exact words typed.
+- Common transcription errors to forgive:
+    "uvar" or "u var"   → means "var"
+    "termination"       → means "declaration"
+    "false variable"    → means "const variable"
+    "reference error"   → means "ReferenceError"
+    "undefined"         → may mean the keyword or the concept
+    Broken grammar      → speaker was explaining verbally, not writing
+    Filler words        → "like", "basically", "I mean", "sort of" are natural in speech
+- If the CORE MEANING of the answer is correct despite transcription noise → score it as correct.
+- Do NOT penalize a candidate for words that were clearly mishearing or mis-transcription.
+- If unsure whether it is a transcription error or genuine mistake — give benefit of the doubt.
+
+═══════════════════════════════════════
+OUTPUT — All text in ${language}
+═══════════════════════════════════════
+Return JSON:
+{
+  "canProceed": boolean,
+  "verdict": "one-line hiring decision",
+  "overallScore": number (0–10, one decimal place),
+  "perAnswerScores": [
+    {
+      "questionNumber": 1,
+      "question": "...",
+      "answer": "...",
+      "score": number (0–10),
+      "reason": "one sentence explaining why this score"
+    }
+  ],
+  "summary": "2–3 sentence honest assessment of overall performance",
+  "strengths": ["only real demonstrated strengths"],
+  "gaps": ["specific weak areas with what was wrong"],
+  "recommendation": "what to study or practice"
+}
+
+Scenario context: ${scenario || "Senior technical interviewer"}.
+Interviewer behavior style: ${behavior}.`
       },
       {
         role: "user",
@@ -451,18 +645,21 @@ async function finalAssessment(topic, history, context = {}) {
           language,
           scenario,
           behavior,
+          totalQuestions: history.length,
+          formattedAnswers: answersBlock,
           history
         })
       }
     ],
     {
       canProceed: false,
-      verdict: "needs practice",
-      overallScore: 5,
-      summary: "Unable to generate a final assessment.",
+      verdict: "Unable to evaluate",
+      overallScore: 0,
+      perAnswerScores: [],
+      summary: "Assessment could not be completed.",
       strengths: [],
-      gaps: [],
-      recommendation: "Try again with clearer answers."
+      gaps: ["Assessment failed — please retry"],
+      recommendation: "Please try the interview again."
     }
   );
 }
@@ -572,17 +769,9 @@ app.post("/api/interview/next", upload.single("audio"), async (req, res) => {
     const mimeType = req.file?.mimetype || "audio/webm";
     const session = interviewSessions.get(interviewId);
 
-    if (!session) {
-      return res.status(400).json({ error: "Interview session not found" });
-    }
-
-    if (!currentQuestion) {
-      return res.status(400).json({ error: "Question is required" });
-    }
-
-    if (!audioPath) {
-      return res.status(400).json({ error: "Audio answer is required" });
-    }
+    if (!session) return res.status(400).json({ error: "Interview session not found" });
+    if (!currentQuestion) return res.status(400).json({ error: "Question is required" });
+    if (!audioPath) return res.status(400).json({ error: "Audio answer is required" });
 
     const currentAnswer = await transcribeAudioFile(audioPath, originalName, mimeType, {
       language: session.language
@@ -596,12 +785,18 @@ app.post("/api/interview/next", upload.single("audio"), async (req, res) => {
 
     session.history.push({
       question: currentQuestion,
-      answer: currentAnswer
+      answer: currentAnswer,
+      mode: "new_aspect"   // default before we know the next mode
     });
 
     const nextQuestionNumber = session.history.length + 1;
 
-    let nextQuestion;
+    // ✅ Initialize with fallback FIRST — prevents "before initialization" crash
+    let nextQuestionText = `Please explain one practical experience related to ${session.topic}.`;
+    let nextQuestionTopic = session.topic;
+    let nextQuestionDifficulty = 5;
+    let nextQuestionMode = "new_aspect";
+
     try {
       const generated = await generateQuestion(
         session.topic,
@@ -613,28 +808,31 @@ app.post("/api/interview/next", upload.single("audio"), async (req, res) => {
           behavior: session.behavior
         }
       );
+
+      const rawQuestion = generated.question || fallbackQuestionText(session.topic);
+
       const voiceNextQuestion = await makeVoiceFriendlyQuestion(
         session.topic,
-        generated.question || fallbackQuestionText(session.topic),
+        rawQuestion,
         session.language,
         session.behavior,
         session.scenario
       );
-      nextQuestion = {
-        text: voiceNextQuestion,
-        topic: generated.topic,
-        difficulty: generated.difficulty
-      };
-    } catch (error) {
-      console.error("Question generation failed:", error?.message || error);
-      nextQuestion = {
-        text: `Please explain one practical experience related to ${session.topic}.`,
-        topic: session.topic,
-        difficulty: 5
-      };
+
+      nextQuestionText       = voiceNextQuestion || rawQuestion;
+      nextQuestionTopic      = generated.topic || session.topic;
+      nextQuestionDifficulty = generated.difficulty || 5;
+      nextQuestionMode       = generated.mode || "new_aspect";
+
+    } catch (genError) {
+      console.error("Question generation failed:", genError?.message || genError);
+      // fallback values already set above — continues gracefully
     }
 
-    const nextQuestionAudio = await safeSpeakText(nextQuestion.text, {
+    // Update the last history entry with the actual mode
+    session.history[session.history.length - 1].mode = nextQuestionMode;
+
+    const nextQuestionAudio = await safeSpeakText(nextQuestionText, {
       language: session.language,
       behavior: session.behavior,
       scenario: session.scenario
@@ -645,22 +843,22 @@ app.post("/api/interview/next", upload.single("audio"), async (req, res) => {
       questionNumber: nextQuestionNumber,
       history: session.history,
       currentAnswer,
-      nextQuestion: nextQuestion.text,
+      nextQuestion: nextQuestionText,
       nextQuestionAudio,
-      topic: nextQuestion.topic,
-      difficulty: nextQuestion.difficulty,
+      topic: nextQuestionTopic,
+      difficulty: nextQuestionDifficulty,
+      mode: nextQuestionMode,
       language: session.language,
       scenario: session.scenario,
       behavior: session.behavior
     });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Unable to continue interview" });
+    console.error("NEXT ROUTE ERROR:", error?.message);
+    res.status(500).json({ error: "Unable to continue interview", detail: error?.message });
   } finally {
     const audioPath = req.file?.path;
-    if (audioPath && fs.existsSync(audioPath)) {
-      fs.unlinkSync(audioPath);
-    }
+    if (audioPath && fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
   }
 });
 
@@ -683,6 +881,21 @@ app.post("/api/interview/finish", async (req, res) => {
       behavior: session.behavior
     });
     assessment.overallScore = normalizeOverallScoreOutOf10(assessment.overallScore);
+
+    // ✅ Add this block
+if (Array.isArray(assessment.perAnswerScores)) {
+  assessment.perAnswerScores = assessment.perAnswerScores.map(entry => ({
+    ...entry,
+    score: normalizeOverallScoreOutOf10(entry.score ?? 0)
+  }));
+
+  // Recalculate overallScore from per-answer math for consistency
+  if (assessment.perAnswerScores.length > 0) {
+    const avg = assessment.perAnswerScores.reduce((sum, e) => sum + e.score, 0)
+                / assessment.perAnswerScores.length;
+    assessment.overallScore = Math.round(avg * 10) / 10;
+  }
+}
     const assessmentAudio = await safeSpeakText(
       `${assessment.verdict}. ${assessment.summary} Recommendation: ${assessment.recommendation}.`
       , {
