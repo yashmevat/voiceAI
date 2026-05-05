@@ -237,8 +237,11 @@ function base64ToBlobUrl(base64, mimeType = "audio/mpeg") {
 }
 
 async function playAudio(base64) {
-  if (!base64) {
-    return;
+  if (!base64) return;
+
+  // iOS Chrome Fix: Re-resume AudioContext before every play attempt
+  if (audioContext && audioContext.state === "suspended") {
+    try { await audioContext.resume(); } catch (_) {}
   }
 
   const tryPlay = () => new Promise((resolve) => {
@@ -246,7 +249,8 @@ async function playAudio(base64) {
     audioElement.pause();
     audioElement.currentTime = 0;
     audioElement.src = audioUrl;
-    audioElement.load();
+    // ❌ Removed: audioElement.load() — adds an extra async tick on iOS Chrome
+    //    which breaks playback. Only needed when reusing the same src.
 
     const cleanup = () => {
       audioElement.onended = null;
@@ -377,6 +381,29 @@ function clearFieldError(inputElem) {
 }
 
 async function startInterview() {
+  // ══════════════════════════════════════════════════════════════
+  // iOS Chrome Fix: Pre-warm <audio> element & AudioContext
+  // MUST happen synchronously while the tap gesture is still "hot"
+  // Any await before this breaks the gesture trust chain on iOS Chrome
+  // ══════════════════════════════════════════════════════════════
+  audioElement.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+  try { await audioElement.play(); } catch (_) {}
+  audioElement.pause();
+  audioElement.currentTime = 0;
+  audioElement.src = "";
+
+  // Create AudioContext synchronously in the same gesture frame
+  if (!audioContext) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      audioContext = new AudioCtx();
+    }
+  }
+  if (audioContext && audioContext.state === "suspended") {
+    try { await audioContext.resume(); } catch (_) {}
+  }
+  // ══════════════════════════════════════════════════════════════
+
   const topic = topicInput.value.trim();
   const language = languageInput.value.trim() || "English";
   const scenario = scenarioInput.value.trim();
@@ -423,10 +450,13 @@ async function startInterview() {
   progressPill.innerHTML = "Questions answered: <strong>0</strong>";
 
   try {
-    // await unlockAudioPlayback();
     await ensureMicrophone();
-    await unlockAudioPlayback();
-    
+
+    // Re-resume AudioContext after mic permission (iOS Chrome may re-suspend it)
+    if (audioContext && audioContext.state === "suspended") {
+      try { await audioContext.resume(); } catch (_) {}
+    }
+
     const response = await fetch(`${API_BASE}/api/interview/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
