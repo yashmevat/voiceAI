@@ -1,4 +1,15 @@
 
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.brand-logo img {
+  height: 40px;
+  width: auto;
+  display: block;
+}
         .tooltip-icon {
           display: inline-block;
           width: 18px;
@@ -69,7 +80,18 @@
       --line: rgba(148, 163, 184, 0.18);
       --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
     }
-
+/* :root {
+  --bg: #f0f4f8;
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-strong: rgba(255, 255, 255, 0.96);
+  --text: #0f1c2e;
+  --muted: #4a6280;
+  --accent: #0891b2;
+  --good: #16a34a;
+  --bad: #dc2626;
+  --line: rgba(15, 28, 46, 0.12);
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.10);
+} */
     * {
       box-sizing: border-box;
     }
@@ -84,7 +106,16 @@
         radial-gradient(circle at top right, rgba(139, 92, 246, 0.18), transparent 28%),
         linear-gradient(160deg, #050b14 0%, #09131f 55%, #0d1727 100%);
     }
-
+/* body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(103, 232, 249, 0.06), transparent 34%),
+    radial-gradient(circle at top right, rgba(139, 92, 246, 0.06), transparent 28%),
+    linear-gradient(160deg, #f0f4f8 0%, #e8f0f7 55%, #dfe8f2 100%);
+} */
     .shell {
       width: min(1180px, calc(100% - 32px));
       margin: 0 auto;
